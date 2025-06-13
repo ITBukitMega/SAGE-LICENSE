@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sage Session Dashboard</title>
+    <!-- Use a production-ready Tailwind CSS build instead of CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Just use Chart.js without date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    
+    <style>
+        .license-count {
+            transition: color 0.5s ease;
+        }
+        .chart-container {
+            position: relative;
+            height: 250px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <div class="flex flex-col md:flex-row md:items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Sage Session Dashboard</h1>
+                    <p class="text-gray-500">Monitoring Active Licenses</p>
+                </div>
+                <div class="mt-4 md:mt-0 flex items-center space-x-4">
+                    <div id="lastUpdateContainer" class="text-sm text-gray-600 transition-colors duration-500">
+                        Last Update: <span id="lastUpdate" class="font-medium">-</span>
+                    </div>
+                    <button id="refreshButton" class="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700">
+                        <i class="fas fa-sync-alt"></i>
+                        <span>Refresh</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- License Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+            <!-- ERPDEV Card -->
+            <div id="card-ERPDEV" class="bg-white rounded-lg shadow p-5 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">ERPDEV</p>
+                        <h3 class="text-2xl font-bold text-gray-800 license-count">0/2</h3>
+                        <p class="text-sm text-gray-500 mt-1">Development Licenses</p>
+                    </div>
+                    <div class="bg-indigo-100 p-4 rounded-full">
+                        <i class="fas fa-laptop-code text-indigo-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ERPDIS Card -->
+            <div id="card-ERPDIS" class="bg-white rounded-lg shadow p-5 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">ERPDIS</p>
+                        <h3 class="text-2xl font-bold text-gray-800 license-count">0/32</h3>
+                        <p class="text-sm text-gray-500 mt-1">Distribution Licenses</p>
+                    </div>
+                    <div class="bg-green-100 p-4 rounded-full">
+                        <i class="fas fa-truck text-green-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ERPFIN Card -->
+            <div id="card-ERPFIN" class="bg-white rounded-lg shadow p-5 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">ERPFIN</p>
+                        <h3 class="text-2xl font-bold text-gray-800 license-count">0/7</h3>
+                        <p class="text-sm text-gray-500 mt-1">Financial Licenses</p>
+                    </div>
+                    <div class="bg-blue-100 p-4 rounded-full">
+                        <i class="fas fa-money-check-dollar text-blue-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ERPFULL Card -->
+            <div id="card-ERPFULL" class="bg-white rounded-lg shadow p-5 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">ERPFULL</p>
+                        <h3 class="text-2xl font-bold text-gray-800 license-count">0/23</h3>
+                        <p class="text-sm text-gray-500 mt-1">Full Access Licenses</p>
+                    </div>
+                    <div class="bg-purple-100 p-4 rounded-full">
+                        <i class="fas fa-gear text-purple-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- ERPTRAN Card -->
+            <div id="card-ERPTRAN" class="bg-white rounded-lg shadow p-5 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-lg">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm">ERPTRAN</p>
+                        <h3 class="text-2xl font-bold text-gray-800 license-count">0/10</h3>
+                        <p class="text-sm text-gray-500 mt-1">Transaction Licenses</p>
+                    </div>
+                    <div class="bg-red-100 p-4 rounded-full">
+                        <i class="fas fa-exchange-alt text-red-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Total Card -->
+        <div class="bg-white rounded-lg shadow p-5 mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-500 text-sm">Total Active Licenses</p>
+                    <h3 class="text-3xl font-bold text-gray-800" id="totalLicenses">0/74</h3>
+                    <p class="text-sm text-gray-500 mt-1">From Every Badge Type</p>
+                </div>
+                <div class="bg-blue-100 p-4 rounded-full">
+                    <i class="fas fa-users text-blue-600 text-2xl"></i>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-100">
+                <p class="text-sm text-gray-600">
+                    <i class="fas fa-info-circle text-blue-600 mr-1"></i> 
+                    Data is automatically updated every 45 minutes.
+                </p>
+            </div>
+        </div>
+        
+        <!-- Charts Section -->
+        <div class="bg-white rounded-lg shadow p-5 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold text-gray-800">License Usage Trends (Last 24 Hours)</h3>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- ERPFULL Chart -->
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">ERPFULL Licenses</h4>
+                    <div class="badge-limit inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-3 py-1 rounded-full shadow" data-badge="ERPFULL">Limit</div>
+                    <div class="chart-container">
+                        <canvas id="chart-ERPFULL"></canvas>
+                    </div>
+                </div>
+
+                <!-- ERPDIS Chart -->
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">ERPDIS Licenses</h4>
+                    <div class="badge-limit inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-3 py-1 rounded-full shadow" data-badge="ERPDIS">Limit</div>
+                    <div class="chart-container">
+                        <canvas id="chart-ERPDIS"></canvas>
+                    </div>
+                </div>
+
+                <!-- ERPFIN Chart -->
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">ERPFIN Licenses</h4>
+                    <div class="badge-limit inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-3 py-1 rounded-full shadow" data-badge="ERPFIN">Limit</div>
+                    <div class="chart-container">
+                        <canvas id="chart-ERPFIN"></canvas>
+                    </div>
+                </div>
+
+                <!-- ERPDEV Chart -->
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">ERPDEV Licenses</h4>
+                    <div class="badge-limit inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-3 py-1 rounded-full shadow" data-badge="ERPDEV">Limit</div>
+                    <div class="chart-container">
+                        <canvas id="chart-ERPDEV"></canvas>
+                    </div>
+                </div>
+                
+                <!-- ERPTRAN Chart -->
+                <div class="bg-gray-50 rounded-lg p-3">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">ERPTRAN Licenses</h4>
+                    <div class="badge-limit inline-flex items-center bg-red-50 text-red-700 text-xs font-semibold px-3 py-1 rounded-full shadow" data-badge="ERPTRAN">Limit</div>
+                    <div class="chart-container">
+                        <canvas id="chart-ERPTRAN"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="text-center text-gray-500 text-sm py-4">
+            <p>&copy; 2025 Developed by IT. Realtime Sage Monitor</p>
+        </div>
+    </div>
+
+    <!-- Load simplified dashboard.js directly -->
+     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@1.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
