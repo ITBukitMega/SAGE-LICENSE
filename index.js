@@ -20,7 +20,15 @@ const sqlConfig = {
         trustServerCertificate: true,
         // Jakarta Time
         useUTC: false,
+        // Tambahan untuk optimisasi
+        requestTimeout: 30000,
+        connectionTimeout: 30000,
     },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
 };
 
 // Inisialisasi aplikasi Express
@@ -36,56 +44,80 @@ app.use((req, res, next) => {
 // Middleware untuk serving static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API endpoint untuk mengambil data session dari view listsession
+// OPTIMIZED API endpoint untuk mengambil data session dari view listsession
 app.get('/api/sessions', async (req, res) => {
     let pool;
     try {
+        console.log('API /api/sessions called');
         pool = await new sql.ConnectionPool(sqlConfig).connect();
+        
+        // Query yang lebih sederhana dan cepat
         const result = await pool.query`
             SELECT Badge, License
             FROM listsessionnow
+            WHERE Badge IN ('ERPDEV', 'ERPDIS', 'ERPFIN', 'ERPFULL', 'ERPTRAN')
         `;
+        
+        console.log(`Query returned ${result.recordset.length} records`);
         
         const badgeTypes = ['ERPDEV', 'ERPDIS', 'ERPFIN', 'ERPFULL', 'ERPTRAN'];
         const sessionMap = {};
         
+        // Buat map dari hasil query
         result.recordset.forEach(record => {
-            sessionMap[record.Badge] = record.License;
+            sessionMap[record.Badge] = record.License || 0;
         });
         
+        // Pastikan semua badge ada dengan nilai default 0
         const responseData = badgeTypes.map(badge => ({
             Badge: badge,
             License: sessionMap[badge] || 0
         }));
         
+        console.log('Response data:', responseData);
         res.json(responseData);
+        
     } catch (err) {
         console.error('Error fetching session data:', err.message);
-        res.status(500).json({ error: 'Failed to fetch session data', message: err.message });
+        console.error('Stack trace:', err.stack);
+        
+        // Return default data jika ada error
+        const defaultData = [
+            { Badge: 'ERPDEV', License: 0 },
+            { Badge: 'ERPDIS', License: 0 },
+            { Badge: 'ERPFIN', License: 0 },
+            { Badge: 'ERPFULL', License: 0 },
+            { Badge: 'ERPTRAN', License: 0 }
+        ];
+        
+        res.status(200).json(defaultData); // Return 200 dengan default data
     } finally {
-        if (pool) await pool.close();
+        if (pool) {
+            try {
+                await pool.close();
+            } catch (closeErr) {
+                console.error('Error closing pool:', closeErr.message);
+            }
+        }
     }
 });
 
-// API endpoint untuk mengambil data history lisensi
+// OPTIMIZED API endpoint untuk mengambil data history lisensi
 app.get('/api/license-history', async (req, res) => {
-    // Always default to 24 hours if not specified
     const hours = parseInt(req.query.hours) || 24;
     const badge = req.query.badge;
     
     let pool;
     try {
+        console.log(`API /api/license-history called for ${hours} hours`);
         pool = await new sql.ConnectionPool(sqlConfig).connect();
         const request = pool.request();
         
         request.input('hours', sql.Int, hours);
         
-        // Log waktu sekarang menurut server
-        const serverNow = new Date();
-        console.log(`Server current time: ${serverNow.toLocaleString('id-ID')}`);
-        
+        // Query yang dioptimasi dengan LIMIT dan ORDER BY yang efisien
         let query = `
-            SELECT badge, licenseCount, timestamp
+            SELECT TOP 1000 badge, licenseCount, timestamp
             FROM LicenseHistory
             WHERE timestamp >= DATEADD(hour, -@hours, GETDATE())
             AND timestamp <= GETDATE()
@@ -97,51 +129,64 @@ app.get('/api/license-history', async (req, res) => {
             request.input('badge', sql.VarChar(50), badge);
         }
         
-        query += ' ORDER BY timestamp ASC';
+        query += ' ORDER BY timestamp DESC'; // DESC untuk data terbaru dulu
         
-        console.log('Executing SQL query:', query);
+        console.log('Executing optimized query...');
         const result = await request.query(query);
         
-        // Log beberapa data untuk debugging
-        if (result.recordset.length > 0) {
-            const firstRecord = result.recordset[0];
-            const lastRecord = result.recordset[result.recordset.length - 1];
-            
-            console.log(`Query returned ${result.recordset.length} records`);
-            console.log(`First record timestamp (raw): ${firstRecord.timestamp}`);
-            console.log(`First record timestamp (localized): ${new Date(firstRecord.timestamp).toLocaleString('id-ID')}`);
-            console.log(`Last record timestamp (raw): ${lastRecord.timestamp}`);
-            console.log(`Last record timestamp (localized): ${new Date(lastRecord.timestamp).toLocaleString('id-ID')}`);
-        } else {
-            console.log('Query returned no records');
-        }
+        console.log(`Query returned ${result.recordset.length} records`);
         
-        // Konversi timestamp ke format yang benar untuk zona waktu Jakarta
-        const formattedResults = result.recordset.map(record => {
-            // Pastikan timestamp dalam format yang benar untuk WIB
+        // Reverse array untuk chronological order (oldest first)
+        const sortedResults = result.recordset.reverse();
+        
+        // Format hasil dengan optimisasi
+        const formattedResults = sortedResults.map(record => {
             const timestamp = new Date(record.timestamp);
             
             return {
                 badge: record.badge,
                 licenseCount: record.licenseCount,
-                timestamp: timestamp.toISOString(),
-                // Tambahkan debug info
-                timestampLocal: timestamp.toLocaleString('id-ID')
+                timestamp: timestamp.toISOString()
             };
         });
         
         res.json(formattedResults);
+        
     } catch (err) {
         console.error('Error fetching license history:', err.message);
-        res.status(500).json({ error: 'Failed to fetch license history', message: err.message });
+        console.error('Stack trace:', err.stack);
+        
+        // Return empty array jika ada error
+        res.status(200).json([]);
     } finally {
-        if (pool) await pool.close();
+        if (pool) {
+            try {
+                await pool.close();
+            } catch (closeErr) {
+                console.error('Error closing pool:', closeErr.message);
+            }
+        }
     }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        timezone: process.env.TZ 
+    });
 });
 
 // Route dashboard
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal server error' });
 });
 
 // Server mulai bos

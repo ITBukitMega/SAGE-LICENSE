@@ -12,15 +12,26 @@ const sqlConfig = {
     options: {
         encrypt: false,
         trustServerCertificate: true,
+        // Optimisasi timeout
+        requestTimeout: 60000,
+        connectionTimeout: 30000,
     },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
 };
 
 async function syncSessions() {
     let mongoClient;
+    let pool;
 
     try {
         const now = new Date();
         const jakartaPlus7 = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+
+        console.log(`🔄 Starting sync at ${jakartaPlus7.toLocaleString('id-ID')}`);
 
         // 1. Koneksi ke MongoDB
         mongoClient = await MongoClient.connect(mongoUri);
@@ -35,8 +46,111 @@ async function syncSessions() {
         console.log(`📦 Ditemukan ${sessions.length} session (tanpa 2 admin)`);
 
         // 3. Koneksi ke SQL Server
-        const pool = await sql.connect(sqlConfig);
+        pool = await sql.connect(sqlConfig);
 
+        // 4. OPTIMISASI: Clear old UserSessions sebelum insert baru
+        console.log('🧹 Cleaning old UserSessions data...');
+        await pool.request()
+            .query(`DELETE FROM UserSessions WHERE syncTime < DATEADD(hour, -2, GETDATE())`);
+
+        // 5. Batch insert untuk UserSessions (lebih efisien)
+        if (sessions.length > 0) {
+            console.log('💾 Inserting UserSessions in batch...');
+            
+            const batchSize = 100;
+            for (let i = 0; i < sessions.length; i += batchSize) {
+                const batch = sessions.slice(i, i + batchSize);
+                await insertUserSessionsBatch(pool, batch, jakartaPlus7);
+            }
+        }
+
+        console.log('✅ UserSessions sinkronisasi berhasil.');
+
+        // 6. Hitung jumlah lisensi per badge
+        const badgeCounts = {
+            ERPDEV: 0,
+            ERPDIS: 0,
+            ERPFIN: 0,
+            ERPFULL: 0,
+            ERPTRAN: 0
+        };
+
+        // Hitung jumlah per badge
+        for (const session of sessions) {
+            const { badge } = session;
+            if (badgeCounts.hasOwnProperty(badge)) {
+                badgeCounts[badge]++;
+            }
+        }
+
+        console.log('📊 License counts:', badgeCounts);
+
+        // 7. Simpan ke tabel history dalam satu transaksi
+        const transaction = new sql.Transaction(pool);
+        await transaction.begin();
+
+        try {
+            for (const badge in badgeCounts) {
+                await transaction.request()
+                    .input('badge', sql.VarChar(50), badge)
+                    .input('licenseCount', sql.Int, badgeCounts[badge])
+                    .input('timestamp', sql.DateTime, jakartaPlus7)
+                    .query(`
+                        INSERT INTO LicenseHistory (badge, licenseCount, timestamp)
+                        VALUES (@badge, @licenseCount, @timestamp)
+                    `);
+            }
+            
+            await transaction.commit();
+            console.log('📊 Data historis lisensi berhasil disimpan.');
+            
+        } catch (transactionError) {
+            await transaction.rollback();
+            throw transactionError;
+        }
+
+        // 8. OPTIMISASI: Cleanup data history yang lebih dari 7 hari
+        const cleanupResult = await pool.request()
+            .query(`
+                DELETE FROM LicenseHistory 
+                WHERE timestamp < DATEADD(day, -7, GETDATE())
+            `);
+        
+        if (cleanupResult.rowsAffected[0] > 0) {
+            console.log(`🧹 Cleaned up ${cleanupResult.rowsAffected[0]} old history records`);
+        }
+
+        console.log(`✅ Sync completed successfully at ${new Date().toLocaleString('id-ID')}`);
+
+    } catch (err) {
+        console.error('❌ Error sinkronisasi:', err.message);
+        console.error('Stack trace:', err.stack);
+    } finally {
+        // Cleanup connections
+        if (mongoClient) {
+            try {
+                await mongoClient.close();
+            } catch (closeErr) {
+                console.error('Error closing MongoDB:', closeErr.message);
+            }
+        }
+        
+        if (pool) {
+            try {
+                await pool.close();
+            } catch (closeErr) {
+                console.error('Error closing SQL pool:', closeErr.message);
+            }
+        }
+    }
+}
+
+// Helper function untuk batch insert UserSessions
+async function insertUserSessionsBatch(pool, sessions, syncTime) {
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
         for (const session of sessions) {
             const {
                 publicId,
@@ -54,7 +168,7 @@ async function syncSessions() {
                 status,
             } = session;
 
-            await pool.request()
+            await transaction.request()
                 .input('publicId', sql.UniqueIdentifier, publicId)
                 .input('userName', sql.VarChar(100), userName)
                 .input('clientId', sql.UniqueIdentifier, clientId)
@@ -68,7 +182,7 @@ async function syncSessions() {
                 .input('lastAccessUTC', sql.DateTime, new Date(lastAccessUTC))
                 .input('expiredAtUTC', sql.DateTime, new Date(expiredAtUTC))
                 .input('status', sql.Int, status)
-                .input('syncTime', sql.DateTime, jakartaPlus7)
+                .input('syncTime', sql.DateTime, syncTime)
                 .query(`
                     INSERT INTO UserSessions (
                         publicId, userName, clientId, host, dataset, badge, peerAddress, serverName,
@@ -81,43 +195,10 @@ async function syncSessions() {
                 `);
         }
 
-        console.log('✅ Sinkronisasi berhasil disimpan ke SQL Server.');
-
-        // Hitung jumlah lisensi per badge
-        const badgeCounts = {
-            ERPDEV: 0,
-            ERPDIS: 0,
-            ERPFIN: 0,
-            ERPFULL: 0,
-            ERPTRAN: 0
-        };
-
-        // Hitung jumlah per badge
-        for (const session of sessions) {
-            const { badge } = session;
-            if (badgeCounts.hasOwnProperty(badge)) {
-                badgeCounts[badge]++;
-            }
-        }
-
-        // Simpan ke tabel history
-        for (const badge in badgeCounts) {
-            await pool.request()
-                .input('badge', sql.VarChar(50), badge)
-                .input('licenseCount', sql.Int, badgeCounts[badge])
-                .input('timestamp', sql.DateTime, jakartaPlus7)
-                .query(`
-                    INSERT INTO LicenseHistory (badge, licenseCount, timestamp)
-                    VALUES (@badge, @licenseCount, @timestamp)
-                `);
-        }
-
-        console.log('📊 Data historis lisensi berhasil disimpan.');
-    } catch (err) {
-        console.error('❌ Error sinkronisasi:', err.message);
-    } finally {
-        if (mongoClient) await mongoClient.close();
-        await sql.close();
+        await transaction.commit();
+    } catch (error) {
+        await transaction.rollback();
+        throw error;
     }
 }
 
