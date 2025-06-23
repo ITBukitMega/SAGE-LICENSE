@@ -109,17 +109,6 @@ async function syncSessions() {
             throw transactionError;
         }
 
-        // 8. OPTIMISASI: Cleanup data history yang lebih dari 7 hari
-        const cleanupResult = await pool.request()
-            .query(`
-                DELETE FROM LicenseHistory 
-                WHERE timestamp < DATEADD(day, -7, GETDATE())
-            `);
-        
-        if (cleanupResult.rowsAffected[0] > 0) {
-            console.log(`🧹 Cleaned up ${cleanupResult.rowsAffected[0]} old history records`);
-        }
-
         console.log(`✅ Sync completed successfully at ${new Date().toLocaleString('id-ID')}`);
 
     } catch (err) {
