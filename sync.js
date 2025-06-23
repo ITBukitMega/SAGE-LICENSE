@@ -48,11 +48,6 @@ async function syncSessions() {
         // 3. Koneksi ke SQL Server
         pool = await sql.connect(sqlConfig);
 
-        // 4. OPTIMISASI: Clear old UserSessions sebelum insert baru
-        console.log('🧹 Cleaning old UserSessions data...');
-        await pool.request()
-            .query(`DELETE FROM UserSessions WHERE syncTime < DATEADD(hour, -2, GETDATE())`);
-
         // 5. Batch insert untuk UserSessions (lebih efisien)
         if (sessions.length > 0) {
             console.log('💾 Inserting UserSessions in batch...');
